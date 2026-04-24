@@ -1,51 +1,84 @@
 # MyAnki
 
-A Bun + Astro + Tailwind frontend for browsing and editing your Anki collection through AnkiConnect.
+A fast local frontend for browsing and editing your Anki collection through [AnkiConnect](https://foosoft.net/projects/anki-connect/).
 
-## Features
+Built with Astro, React, Tailwind, and Bun.
 
-- deck tree on the left
-- nested tag tree on the left
-- card grid for browsing cards
-- filter bar powered by Anki browser queries
-- field editing for the selected note
-- tag editing
-- deck moving for the selected card
-- suspend / unsuspend / delete actions
-- raw AnkiConnect action console for anything not covered by the UI
+## Screenshot
+
+![MyAnki overview showing the tag tree on the left and a masonry grid of editable cards on the right](docs/screenshots/myanki-overview.png)
+
+## What it does
+
+MyAnki gives you a card-browser style interface for your existing Anki collection:
+
+- browse cards in a responsive masonry grid
+- filter by hierarchical tags from the left sidebar
+- edit note fields inline with markdown-powered editors
+- preview rendered HTML, including images from your Anki media collection
+- add or remove tags from each note
+- open a note directly in the Anki browser
+- suspend, unsuspend, or delete cards/notes
+- create a new card from the current deck / note type context
+- autosave field and tag changes
 
 ## Stack
 
 - Bun
 - Astro
-- React inside Astro
+- React
 - Tailwind CSS
+- Framer Motion
+- CodeMirror
 - Inter font
 
 ## Getting started
 
-1. Make sure Anki is running.
-2. Install the AnkiConnect add-on in Anki.
+### Requirements
+
+- [Bun](https://bun.sh/)
+- Anki desktop
+- The [AnkiConnect add-on](https://ankiweb.net/shared/info/2055492159)
+
+### Run locally
+
+1. Start Anki.
+2. Make sure AnkiConnect is installed and enabled.
 3. Install dependencies:
 
 ```bash
 bun install
 ```
 
-4. Start the app:
+4. Start the dev server:
 
 ```bash
 bun run dev
 ```
 
-5. Open the app in your browser. The default AnkiConnect endpoint is:
+5. Open:
+
+```text
+http://localhost:4321
+```
+
+MyAnki talks to AnkiConnect at:
 
 ```text
 http://127.0.0.1:8765
 ```
 
+## Available scripts
+
+```bash
+bun run dev      # start the Astro dev server
+bun run build    # build for production
+bun run preview  # preview the production build locally
+```
+
 ## Notes
 
-- The filter bar combines your raw Anki browser query with deck, tag, note type, and state selections.
-- The raw action panel lets you call any AnkiConnect action with JSON parameters.
-- This app is focused on viewing and editing, not study/review.
+- This app is meant for collection browsing and editing, not review/study mode.
+- Tag expansion state is persisted in local storage.
+- Cards refresh periodically so collection changes made in Anki show up in the UI.
+- Field content is edited as markdown and saved back to Anki as HTML.
