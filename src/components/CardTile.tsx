@@ -4,6 +4,7 @@ import { motion } from 'framer-motion';
 import CodeMirror from '@uiw/react-codemirror';
 import { markdown as markdownLanguage } from '@codemirror/lang-markdown';
 import { RangeSetBuilder } from '@codemirror/state';
+import type { EditorView as CodeMirrorEditorView } from '@codemirror/view';
 import { Decoration, EditorView, ViewPlugin, WidgetType } from '@codemirror/view';
 import { BookmarkIcon, Cross2Icon, CrossCircledIcon, OpenInNewWindowIcon, TrashIcon } from '@radix-ui/react-icons';
 import katex from 'katex';
@@ -55,9 +56,12 @@ function CardTile({
 
   return (
     <motion.article
+      animate={{ opacity: 1, scale: 1, y: 0 }}
       className="group masonry-item overflow-hidden rounded-[1.1rem] border border-slate-300 bg-white shadow-[0_2px_8px_rgba(15,23,42,0.05)] transition-shadow hover:shadow-[0_5px_14px_rgba(15,23,42,0.08)] md:rounded-[1.4rem]"
+      exit={{ opacity: 0, scale: 0.98, y: 8 }}
+      initial={{ opacity: 0, scale: 0.98, y: 8 }}
       layout
-      transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
+      transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
     >
       {note && draft && frontField ? (
         <>
@@ -114,7 +118,7 @@ function CardTile({
           )}
         </>
       ) : (
-        <div className="p-4 text-xs text-slate-400 md:p-5 md:text-sm">Note details are not available for this card.</div>
+        <div className="p-4 text-base font-normal text-slate-400 md:p-5">Note details are not available for this card.</div>
       )}
     </motion.article>
   );
@@ -133,10 +137,11 @@ function FieldEditor({
 }) {
   const [isEditing, setIsEditing] = useState(false);
   const [measuredHeight, setMeasuredHeight] = useState(42);
-  const [frozenHeight, setFrozenHeight] = useState<number | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const previewMeasureRef = useRef<HTMLDivElement | null>(null);
   const sourceMeasureRef = useRef<HTMLDivElement | null>(null);
+  const editorViewRef = useRef<CodeMirrorEditorView | null>(null);
+  const pendingCursorCoordsRef = useRef<{ x: number; y: number } | null>(null);
 
   const rawHtml = useMemo(() => markdownToHtml(value) || '&nbsp;', [value]);
   const [resolvedHtml, setResolvedHtml] = useState(rawHtml);
@@ -203,7 +208,6 @@ function FieldEditor({
     const handlePointerDown = (event: PointerEvent) => {
       if (!rootRef.current?.contains(event.target as Node)) {
         setIsEditing(false);
-        setFrozenHeight(null);
       }
     };
 
@@ -211,7 +215,7 @@ function FieldEditor({
     return () => document.removeEventListener('pointerdown', handlePointerDown);
   }, [isEditing]);
 
-  const editorHeight = frozenHeight ?? measuredHeight;
+  const editorHeight = measuredHeight;
   const panelClassName = panel === 'front' ? 'card-panel-front' : 'card-panel-back';
 
   return (
@@ -240,14 +244,21 @@ function FieldEditor({
             extensions={editorExtensions}
             height="100%"
             onChange={onChange}
+            onCreateEditor={(view) => {
+              editorViewRef.current = view;
+              if (pendingCursorCoordsRef.current) {
+                placeCursorFromCoords(view, pendingCursorCoordsRef.current);
+                pendingCursorCoordsRef.current = null;
+              }
+            }}
             value={value}
           />
         </div>
       ) : (
         <button
           className="h-full w-full text-left"
-          onClick={() => {
-            setFrozenHeight(measuredHeight);
+          onClick={(event) => {
+            pendingCursorCoordsRef.current = { x: event.clientX, y: event.clientY };
             setIsEditing(true);
           }}
           style={{ height: `${editorHeight}px` }}
@@ -261,6 +272,21 @@ function FieldEditor({
       )}
     </div>
   );
+}
+
+function placeCursorFromCoords(view: CodeMirrorEditorView, coords: { x: number; y: number }) {
+  window.requestAnimationFrame(() => {
+    const position = view.posAtCoords(coords);
+    view.focus();
+
+    if (position == null) {
+      const end = view.state.doc.length;
+      view.dispatch({ selection: { anchor: end } });
+      return;
+    }
+
+    view.dispatch({ selection: { anchor: position } });
+  });
 }
 
 function CardActions({
@@ -348,7 +374,7 @@ function CardActions({
           title="Edit tags"
           type="button"
         >
-          <BookmarkIcon className="h-3.5 w-3.5" />
+          <BookmarkIcon className="h-4 w-4" />
         </button>
         {tagsOpen && typeof document !== 'undefined'
           ? createPortal(
@@ -371,7 +397,7 @@ function CardActions({
 
                       return (
                         <button
-                          className={`inline-flex w-max items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-1.5 text-xs shadow-sm transition ${
+                          className={`inline-flex w-max items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-1.5 text-xs font-normal shadow-sm transition ${
                             selected
                               ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300'
                               : 'border-slate-200 bg-slate-50 text-slate-500 hover:border-slate-300 hover:bg-white hover:text-slate-900'
@@ -387,7 +413,7 @@ function CardActions({
                         >
                           <span>{tag}</span>
                           <span className={`inline-flex h-5 w-5 items-center justify-center rounded-full ${selected ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-700'}`}>
-                            <Cross2Icon className="h-3 w-3" />
+                            <Cross2Icon className="h-4 w-4" />
                           </span>
                         </button>
                       );
@@ -400,10 +426,10 @@ function CardActions({
           : null}
       </div>
 
-      <div className="pointer-events-auto flex items-center justify-end gap-1.5 text-[10px] text-slate-400 md:gap-2 md:text-[11px]">
+      <div className="pointer-events-auto flex items-center justify-end gap-1.5 text-base font-normal text-slate-400 md:gap-2">
         {saving ? <SavingSpinner /> : null}
         {pending ? (
-          <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700 ring-1 ring-amber-200 md:text-[11px]">
+          <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-base font-normal text-amber-700 ring-1 ring-amber-200">
             Unsaved
           </span>
         ) : (
@@ -415,7 +441,7 @@ function CardActions({
               title="Open in Anki"
               type="button"
             >
-              <OpenInNewWindowIcon className="h-3.5 w-3.5" />
+              <OpenInNewWindowIcon className="h-4 w-4" />
             </button>
             <button
               aria-label={card.queue === -1 ? 'Unsuspend' : 'Suspend'}
@@ -430,7 +456,7 @@ function CardActions({
               title={card.queue === -1 ? 'Unsuspend' : 'Suspend'}
               type="button"
             >
-              <CrossCircledIcon className="h-3.5 w-3.5" />
+              <CrossCircledIcon className="h-4 w-4" />
             </button>
           </>
         )}
@@ -441,7 +467,7 @@ function CardActions({
           title={pending ? 'Discard' : 'Delete'}
           type="button"
         >
-          <TrashIcon className="h-3.5 w-3.5" />
+          <TrashIcon className="h-4 w-4" />
         </button>
       </div>
     </div>
@@ -451,7 +477,7 @@ function CardActions({
 function SavingSpinner() {
   return (
     <span aria-label="Saving" className="inline-flex items-center text-slate-400" role="status" title="Saving">
-      <svg className="h-3.5 w-3.5 animate-spin" fill="none" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+      <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
         <circle cx="12" cy="12" r="9" stroke="currentColor" strokeOpacity="0.25" strokeWidth="3" />
         <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeLinecap="round" strokeWidth="3" />
       </svg>
