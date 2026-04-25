@@ -1,9 +1,12 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
 import CodeMirror from '@uiw/react-codemirror';
 import { markdown as markdownLanguage } from '@codemirror/lang-markdown';
-import { EditorView } from '@codemirror/view';
+import { RangeSetBuilder } from '@codemirror/state';
+import { Decoration, EditorView, ViewPlugin, WidgetType } from '@codemirror/view';
 import { BookmarkIcon, Cross2Icon, CrossCircledIcon, OpenInNewWindowIcon, TrashIcon } from '@radix-ui/react-icons';
+import katex from 'katex';
 import type { CardInfo, NoteInfo } from '../lib/ankiconnect';
 import { markdownToHtml } from '../lib/markdown';
 import { resolveHtmlMedia } from '../lib/media';
@@ -19,6 +22,7 @@ interface CardTileProps {
   card: CardInfo;
   endpoint: string;
   draft: NoteDraft | null;
+  isPending?: boolean;
   note: NoteInfo | null;
   onDelete: (noteId: number) => void;
   onFieldChange: (noteId: number, fieldName: string, value: string) => void;
@@ -29,13 +33,12 @@ interface CardTileProps {
   working: boolean;
 }
 
-const editorExtensions = [markdownLanguage(), EditorView.lineWrapping];
-
 function CardTile({
   availableTags,
   card,
   endpoint,
   draft,
+  isPending = false,
   note,
   onDelete,
   onFieldChange,
@@ -85,6 +88,7 @@ function CardTile({
                 onOpen={onOpen}
                 onSuspend={onSuspend}
                 onTagsChange={onTagsChange}
+                pending={isPending}
                 saving={saving}
                 selectedTags={splitTags(draft.tags)}
                 working={working}
@@ -101,6 +105,7 @@ function CardTile({
                 onOpen={onOpen}
                 onSuspend={onSuspend}
                 onTagsChange={onTagsChange}
+                pending={isPending}
                 saving={saving}
                 selectedTags={splitTags(draft.tags)}
                 working={working}
@@ -266,6 +271,7 @@ function CardActions({
   onOpen,
   onSuspend,
   onTagsChange,
+  pending,
   saving,
   selectedTags,
   working,
@@ -277,6 +283,7 @@ function CardActions({
   onOpen: (noteId: number) => void;
   onSuspend: (cardId: number, suspended: boolean) => void;
   onTagsChange: (noteId: number, value: string) => void;
+  pending: boolean;
   saving: boolean;
   selectedTags: string[];
   working: boolean;
@@ -325,7 +332,13 @@ function CardActions({
   }, [tagsOpen]);
 
   return (
-    <div className="pointer-events-none absolute inset-x-3 bottom-3 flex items-end justify-between gap-3 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 md:inset-x-4 md:bottom-4 md:gap-4">
+    <div
+      className={`absolute inset-x-3 bottom-3 z-20 flex items-end justify-between gap-3 transition-opacity md:inset-x-4 md:bottom-4 md:gap-4 ${
+        tagsOpen
+          ? 'visible opacity-100'
+          : 'invisible opacity-0 group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100'
+      }`}
+    >
       <div className="pointer-events-auto" ref={tagsRootRef}>
         <button
           aria-label="Edit tags"
@@ -337,84 +350,95 @@ function CardActions({
         >
           <BookmarkIcon className="h-3.5 w-3.5" />
         </button>
-        {tagsOpen ? (
-          <div
-            className="fixed z-30 min-w-max max-w-[calc(100vw-24px)] rounded-2xl border border-slate-200 bg-white p-2.5 shadow-lg shadow-slate-200/60"
-            ref={dropdownRef}
-            style={{ left: `${dropdownPosition.left}px`, top: `${dropdownPosition.top}px` }}
-          >
-            <div className="max-h-52 overflow-auto">
-              <div className="flex flex-col items-start gap-2">
-                {[...availableTags].sort((left, right) => {
-                  const leftSelected = selectedTags.includes(left);
-                  const rightSelected = selectedTags.includes(right);
-                  if (leftSelected === rightSelected) {
-                    return left.localeCompare(right);
-                  }
-                  return leftSelected ? -1 : 1;
-                }).map((tag) => {
-                  const selected = selectedTags.includes(tag);
+        {tagsOpen && typeof document !== 'undefined'
+          ? createPortal(
+              <div
+                className="fixed z-30 min-w-max max-w-[calc(100vw-24px)] rounded-2xl border border-slate-200 bg-white p-2.5 shadow-lg shadow-slate-200/60"
+                ref={dropdownRef}
+                style={{ left: `${dropdownPosition.left}px`, top: `${dropdownPosition.top}px` }}
+              >
+                <div className="max-h-52 overflow-auto">
+                  <div className="flex flex-col items-start gap-2">
+                    {[...availableTags].sort((left, right) => {
+                      const leftSelected = selectedTags.includes(left);
+                      const rightSelected = selectedTags.includes(right);
+                      if (leftSelected === rightSelected) {
+                        return left.localeCompare(right);
+                      }
+                      return leftSelected ? -1 : 1;
+                    }).map((tag) => {
+                      const selected = selectedTags.includes(tag);
 
-                  return (
-                    <button
-                      className={`inline-flex w-max items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-1.5 text-xs shadow-sm transition ${
-                        selected
-                          ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300'
-                          : 'border-slate-200 bg-slate-50 text-slate-500 hover:border-slate-300 hover:bg-white hover:text-slate-900'
-                      }`}
-                      key={tag}
-                      onClick={() => {
-                        const nextTags = selected
-                          ? selectedTags.filter((selectedTag) => selectedTag !== tag)
-                          : [...selectedTags, tag];
-                        onTagsChange(noteId, nextTags.join(' '));
-                      }}
-                      type="button"
-                    >
-                      <span>{tag}</span>
-                      <span className={`inline-flex h-5 w-5 items-center justify-center rounded-full ${selected ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-700'}`}>
-                        <Cross2Icon className="h-3 w-3" />
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-        ) : null}
+                      return (
+                        <button
+                          className={`inline-flex w-max items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-1.5 text-xs shadow-sm transition ${
+                            selected
+                              ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300'
+                              : 'border-slate-200 bg-slate-50 text-slate-500 hover:border-slate-300 hover:bg-white hover:text-slate-900'
+                          }`}
+                          key={tag}
+                          onClick={() => {
+                            const nextTags = selected
+                              ? selectedTags.filter((selectedTag) => selectedTag !== tag)
+                              : [...selectedTags, tag];
+                            onTagsChange(noteId, nextTags.join(' '));
+                          }}
+                          type="button"
+                        >
+                          <span>{tag}</span>
+                          <span className={`inline-flex h-5 w-5 items-center justify-center rounded-full ${selected ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-700'}`}>
+                            <Cross2Icon className="h-3 w-3" />
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>,
+              document.body,
+            )
+          : null}
       </div>
 
       <div className="pointer-events-auto flex items-center justify-end gap-1.5 text-[10px] text-slate-400 md:gap-2 md:text-[11px]">
         {saving ? <SavingSpinner /> : null}
+        {pending ? (
+          <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700 ring-1 ring-amber-200 md:text-[11px]">
+            Unsaved
+          </span>
+        ) : (
+          <>
+            <button
+              aria-label="Open in Anki"
+              className="inline-flex items-center rounded-full p-1 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+              onClick={() => onOpen(card.note)}
+              title="Open in Anki"
+              type="button"
+            >
+              <OpenInNewWindowIcon className="h-3.5 w-3.5" />
+            </button>
+            <button
+              aria-label={card.queue === -1 ? 'Unsuspend' : 'Suspend'}
+              aria-pressed={card.queue === -1}
+              className={`inline-flex items-center rounded-full p-1 transition disabled:cursor-not-allowed disabled:opacity-40 ${
+                card.queue === -1
+                  ? 'bg-rose-50 text-rose-600 ring-1 ring-rose-200 hover:bg-rose-100 hover:text-rose-700'
+                  : 'text-slate-500 hover:bg-slate-100 hover:text-slate-700'
+              }`}
+              disabled={working}
+              onClick={() => onSuspend(card.cardId, card.queue !== -1)}
+              title={card.queue === -1 ? 'Unsuspend' : 'Suspend'}
+              type="button"
+            >
+              <CrossCircledIcon className="h-3.5 w-3.5" />
+            </button>
+          </>
+        )}
         <button
-          aria-label="Open in Anki"
-          className="inline-flex items-center rounded-full p-1 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
-          onClick={() => onOpen(card.note)}
-          title="Open in Anki"
-          type="button"
-        >
-          <OpenInNewWindowIcon className="h-3.5 w-3.5" />
-        </button>
-        <button
-          aria-label={card.queue === -1 ? 'Unsuspend' : 'Suspend'}
-          aria-pressed={card.queue === -1}
-          className={`inline-flex items-center rounded-full p-1 transition disabled:cursor-not-allowed disabled:opacity-40 ${
-            card.queue === -1
-              ? 'bg-rose-50 text-rose-600 ring-1 ring-rose-200 hover:bg-rose-100 hover:text-rose-700'
-              : 'text-slate-500 hover:bg-slate-100 hover:text-slate-700'
-          }`}
-          disabled={working}
-          onClick={() => onSuspend(card.cardId, card.queue !== -1)}
-          title={card.queue === -1 ? 'Unsuspend' : 'Suspend'}
-          type="button"
-        >
-          <CrossCircledIcon className="h-3.5 w-3.5" />
-        </button>
-        <button
-          aria-label="Delete"
+          aria-label={pending ? 'Discard' : 'Delete'}
           className="inline-flex items-center rounded-full p-1 text-slate-500 transition hover:bg-rose-50 hover:text-rose-600"
           onClick={() => onDelete(noteId)}
-          title="Delete"
+          title={pending ? 'Discard' : 'Delete'}
           type="button"
         >
           <TrashIcon className="h-3.5 w-3.5" />
@@ -448,3 +472,141 @@ function getPrimaryFieldNames(note: NoteInfo): string[] {
 }
 
 export default memo(CardTile);
+
+class MathWidget extends WidgetType {
+  constructor(
+    private readonly value: string,
+    private readonly displayMode: boolean,
+  ) {
+    super();
+  }
+
+  override toDOM() {
+    const element = document.createElement(this.displayMode ? 'div' : 'span');
+    element.className = this.displayMode ? 'cm-math-widget cm-math-widget-block' : 'cm-math-widget';
+    element.innerHTML = katex.renderToString(this.value, {
+      displayMode: this.displayMode,
+      strict: 'ignore',
+      throwOnError: false,
+    });
+    return element;
+  }
+}
+
+const mathPreviewPlugin = ViewPlugin.fromClass(
+  class {
+    decorations;
+
+    constructor(view: EditorView) {
+      this.decorations = buildMathDecorations(view);
+    }
+
+    update(update: { docChanged: boolean; selectionSet: boolean; view: EditorView }) {
+      if (update.docChanged || update.selectionSet) {
+        this.decorations = buildMathDecorations(update.view);
+      }
+    }
+  },
+  {
+    decorations: (value) => value.decorations,
+  },
+);
+
+const editorExtensions = [markdownLanguage(), EditorView.lineWrapping, mathPreviewPlugin];
+
+function buildMathDecorations(view: EditorView) {
+  const builder = new RangeSetBuilder<Decoration>();
+  const text = view.state.doc.toString();
+  const selection = view.state.selection.main;
+
+  for (const range of findMathRanges(text)) {
+    const overlapsSelection = selection.from <= range.to && selection.to >= range.from;
+    if (overlapsSelection) {
+      continue;
+    }
+
+    builder.add(
+      range.from,
+      range.to,
+      Decoration.replace({
+        block: range.displayMode,
+        widget: new MathWidget(range.value, range.displayMode),
+      }),
+    );
+  }
+
+  return builder.finish();
+}
+
+function findMathRanges(text: string): Array<{ displayMode: boolean; from: number; to: number; value: string }> {
+  const ranges: Array<{ displayMode: boolean; from: number; to: number; value: string }> = [];
+  let index = 0;
+
+  while (index < text.length) {
+    if (text.startsWith('$$', index)) {
+      const end = text.indexOf('$$', index + 2);
+      if (end !== -1) {
+        const value = text.slice(index + 2, end).trim();
+        if (value) {
+          ranges.push({ displayMode: true, from: index, to: end + 2, value });
+        }
+        index = end + 2;
+        continue;
+      }
+    }
+
+    if (text.startsWith('\\[', index)) {
+      const end = text.indexOf('\\]', index + 2);
+      if (end !== -1) {
+        const value = text.slice(index + 2, end).trim();
+        if (value) {
+          ranges.push({ displayMode: true, from: index, to: end + 2, value });
+        }
+        index = end + 2;
+        continue;
+      }
+    }
+
+    if (text.startsWith('\\(', index)) {
+      const end = text.indexOf('\\)', index + 2);
+      if (end !== -1) {
+        const value = text.slice(index + 2, end).trim();
+        if (value) {
+          ranges.push({ displayMode: false, from: index, to: end + 2, value });
+        }
+        index = end + 2;
+        continue;
+      }
+    }
+
+    if (text[index] === '$' && text[index - 1] !== '\\' && !text.startsWith('$$', index)) {
+      let end = index + 1;
+
+      while (end < text.length) {
+        if (text[end] === '\n') {
+          end = -1;
+          break;
+        }
+
+        if (text[end] === '$' && text[end - 1] !== '\\') {
+          break;
+        }
+
+        end += 1;
+      }
+
+      if (end > index) {
+        const value = text.slice(index + 1, end).trim();
+        if (value) {
+          ranges.push({ displayMode: false, from: index, to: end + 1, value });
+        }
+        index = end + 1;
+        continue;
+      }
+    }
+
+    index += 1;
+  }
+
+  return ranges;
+}
