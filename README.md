@@ -6,21 +6,22 @@ Built with Astro, React, Tailwind, and Bun.
 
 ## Screenshot
 
-![MyAnki overview showing the tag tree on the left and a masonry grid of editable cards on the right](docs/screenshots/myanki-overview.png)
+![MyAnki overview showing the breadcrumb tag navigator at the top and a masonry grid of editable cards below](docs/screenshots/myanki-overview.png)
 
 ## What it does
 
 MyAnki gives you a card-browser style interface for your existing Anki collection:
 
 - browse cards in a responsive masonry grid
-- filter by hierarchical tags from the left sidebar
+- navigate hierarchical tags from the breadcrumb bar at the top
 - edit note fields inline with markdown-powered editors
-- preview rendered HTML, including images from your Anki media collection
+- preview rendered HTML, including images and LaTeX from your Anki content
 - add or remove tags from each note
 - open a note directly in the Anki browser
 - suspend, unsuspend, or delete cards/notes
-- create a new card from the current deck / note type context
+- create a new card inline and save it once you start typing
 - autosave field and tag changes
+- get toast notifications for saves and errors
 
 ## Stack
 
@@ -79,6 +80,6 @@ bun run preview  # preview the production build locally
 ## Notes
 
 - This app is meant for collection browsing and editing, not review/study mode.
-- Tag expansion state is persisted in local storage.
+- Breadcrumb tag navigation lets you jump directly to a path or open child segments from the separator control.
 - Cards refresh periodically so collection changes made in Anki show up in the UI.
 - Field content is edited as markdown and saved back to Anki as HTML.
