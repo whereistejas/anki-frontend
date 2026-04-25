@@ -329,7 +329,7 @@ function CardActions({
       <div className="pointer-events-auto" ref={tagsRootRef}>
         <button
           aria-label="Edit tags"
-          className="inline-flex items-center p-1 text-slate-500 transition hover:text-slate-900"
+          className="inline-flex items-center rounded-full p-1 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
           onClick={() => setTagsOpen((open) => !open)}
           ref={tagsButtonRef}
           title="Edit tags"
@@ -388,7 +388,7 @@ function CardActions({
         {saving ? <SavingSpinner /> : null}
         <button
           aria-label="Open in Anki"
-          className="inline-flex items-center text-slate-500 transition hover:text-slate-900"
+          className="inline-flex items-center rounded-full p-1 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
           onClick={() => onOpen(card.note)}
           title="Open in Anki"
           type="button"
@@ -397,9 +397,10 @@ function CardActions({
         </button>
         <button
           aria-label={card.queue === -1 ? 'Unsuspend' : 'Suspend'}
+          aria-pressed={card.queue === -1}
           className={`inline-flex items-center rounded-full p-1 transition disabled:cursor-not-allowed disabled:opacity-40 ${
             card.queue === -1
-              ? 'text-slate-500 hover:bg-rose-50 hover:text-rose-600'
+              ? 'bg-rose-50 text-rose-600 ring-1 ring-rose-200 hover:bg-rose-100 hover:text-rose-700'
               : 'text-slate-500 hover:bg-slate-100 hover:text-slate-700'
           }`}
           disabled={working}
