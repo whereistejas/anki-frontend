@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDownIcon, ChevronRightIcon, PlusCircledIcon } from '@radix-ui/react-icons';
-import { LayoutGroup, motion } from 'framer-motion';
+import { ChevronRightIcon, PlusCircledIcon } from '@radix-ui/react-icons';
+import { AnimatePresence, LayoutGroup, motion } from 'framer-motion';
 import { fetchCardsPage, fetchNotesInfo, invokeAnki, type CardInfo, type NoteInfo } from '../lib/ankiconnect';
 import { buildHierarchy, quoteSearchValue, type TreeNode } from '../lib/tree';
 import { htmlToMarkdown, markdownToHtml } from '../lib/markdown';
@@ -93,6 +93,18 @@ export default function App() {
 
     return () => window.clearInterval(interval);
   }, [pageSize, query]);
+
+  useEffect(() => {
+    if (!status) {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      setStatus(null);
+    }, status.tone === 'error' ? 5000 : 3000);
+
+    return () => window.clearTimeout(timeout);
+  }, [status]);
 
   useEffect(() => {
     for (const pageCard of visiblePageCards) {
@@ -409,64 +421,80 @@ export default function App() {
   return (
     <main className="h-screen overflow-hidden bg-slate-50 text-slate-900">
       <div className="mx-auto flex h-full max-w-[1720px] flex-col gap-2 md:gap-3">
-        <section className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          <div className="px-2 pt-1.5 md:px-5 md:pt-4">
-            <div className="flex flex-wrap items-center gap-2.5 px-0.5 py-0.5 md:px-0">
-              <TagBreadcrumb nodes={tagTree} onSelect={setSelectedTag} selectedPath={selectedTag} />
+        <section className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+          <div className="absolute inset-x-0 top-0 z-20 bg-gradient-to-b from-slate-50/92 via-slate-50/22 to-slate-50/0 backdrop-blur-md">
+            <div className="px-2 pt-1 pb-2 md:px-5 md:pt-2 md:pb-2.5">
+              <div className="flex flex-wrap items-center gap-2.5 px-0.5 py-0.5 md:px-0">
+                <TagBreadcrumb nodes={tagTree} onSelect={setSelectedTag} selectedPath={selectedTag} />
 
-              <button
-                aria-label="Add new card"
-                className="inline-flex items-center gap-1.5 rounded-full bg-slate-900 px-2.5 py-1 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
-                disabled={creatingCard}
-                onClick={() => void createNewCard()}
-                title="Add new card"
-                type="button"
-              >
-                <PlusCircledIcon className="h-4 w-4" />
-                <span>New card</span>
-              </button>
+                <button
+                  aria-label="Add new card"
+                  className="inline-flex items-center gap-1.5 rounded-full bg-slate-900 px-2.5 py-1 text-base font-normal text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
+                  disabled={creatingCard}
+                  onClick={() => void createNewCard()}
+                  title="Add new card"
+                  type="button"
+                >
+                  <PlusCircledIcon className="h-4 w-4" />
+                  <span>New card</span>
+                </button>
+              </div>
             </div>
           </div>
 
           {visiblePageCards.length === 0 ? (
-            <div className="grid min-h-0 flex-1 place-items-center px-2 pb-2 text-sm text-slate-400 md:px-5 md:pb-5">
+            <div className="grid min-h-0 flex-1 place-items-center px-2 pt-12 pb-2 text-base text-slate-400 md:px-5 md:pt-16 md:pb-5">
               {loading ? 'Loading cards…' : 'No cards match the current filters.'}
             </div>
           ) : (
-            <div className="scrollbar-hidden min-h-0 flex-1 overflow-auto px-2 pt-3 pb-2 md:px-5 md:pt-4 md:pb-5">
+            <div className="scrollbar-hidden min-h-0 flex-1 overflow-auto px-2 pt-12 pb-2 md:px-5 md:pt-16 md:pb-5">
               <LayoutGroup>
-                <motion.div className="masonry-grid" layout transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}>
-                  {visiblePageCards.map((pageCard) => (
-                    <CardTile
-                      availableTags={tags}
-                      card={pageCard.card}
-                      endpoint={endpoint}
-                      draft={pageCard.note ? noteDrafts[pageCard.note.noteId] ?? null : null}
-                      isPending={pageCard.note?.noteId ? pageCard.note.noteId < 0 : false}
-                      key={pageCard.card.cardId}
-                      note={pageCard.note}
-                      onDelete={deleteNote}
-                      onFieldChange={updateDraftField}
-                      onOpen={openInBrowser}
-                      onSuspend={setSuspended}
-                      onTagsChange={updateDraftTags}
-                      saving={pageCard.note ? Boolean(savingNoteIds[pageCard.note.noteId]) : false}
-                      working={pageCard.note?.noteId ? pageCard.note.noteId < 0 ? false : Boolean(workingCardIds[pageCard.card.cardId]) : false}
-                    />
-                  ))}
+                <motion.div className="masonry-grid" layout transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}>
+                  <AnimatePresence initial={false} mode="popLayout">
+                    {visiblePageCards.map((pageCard) => (
+                      <CardTile
+                        availableTags={tags}
+                        card={pageCard.card}
+                        endpoint={endpoint}
+                        draft={pageCard.note ? noteDrafts[pageCard.note.noteId] ?? null : null}
+                        isPending={pageCard.note?.noteId ? pageCard.note.noteId < 0 : false}
+                        key={pageCard.card.cardId}
+                        note={pageCard.note}
+                        onDelete={deleteNote}
+                        onFieldChange={updateDraftField}
+                        onOpen={openInBrowser}
+                        onSuspend={setSuspended}
+                        onTagsChange={updateDraftTags}
+                        saving={pageCard.note ? Boolean(savingNoteIds[pageCard.note.noteId]) : false}
+                        working={pageCard.note?.noteId ? pageCard.note.noteId < 0 ? false : Boolean(workingCardIds[pageCard.card.cardId]) : false}
+                      />
+                    ))}
+                  </AnimatePresence>
                 </motion.div>
               </LayoutGroup>
             </div>
           )}
         </section>
 
-        {status ? (
-          <div className={`px-2 pb-2 text-xs ${toneClassName(status.tone)} md:px-5 md:pb-3`}>
-            {status.text}
-          </div>
-        ) : null}
+        <AnimatePresence>
+          {status ? <Toast key={`${status.tone}:${status.text}`} status={status} /> : null}
+        </AnimatePresence>
       </div>
     </main>
+  );
+}
+
+function Toast({ status }: { status: { text: string; tone: StatusTone } }) {
+  return (
+    <motion.div
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      className={`pointer-events-none fixed right-3 bottom-3 z-40 max-w-[min(28rem,calc(100vw-1.5rem))] rounded-2xl border px-4 py-3 text-base shadow-lg backdrop-blur-sm md:right-5 md:bottom-5 ${toneClassName(status.tone)}`}
+      exit={{ opacity: 0, y: 8, scale: 0.98 }}
+      initial={{ opacity: 0, y: 12, scale: 0.98 }}
+      transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+    >
+      {status.text}
+    </motion.div>
   );
 }
 
@@ -507,48 +535,56 @@ function TagBreadcrumb({
 
   return (
     <div className="min-w-0 flex-1" ref={rootRef}>
-      <div className="flex flex-wrap items-center gap-1 text-sm">
-        {segments.map((segment, index) => {
+      <div className="flex flex-wrap items-center gap-1 text-base">
+        {segments.map((segment) => {
           const isOpen = openKey === segment.key;
           const isActive = selectedPath === segment.path || (!selectedPath && segment.path === null);
+          const hasDropdown = segment.path === null || segment.options.length > 0;
 
           return (
             <div className="flex items-center gap-1" key={segment.key}>
-              {index > 0 ? <ChevronRightIcon className="h-3.5 w-3.5 text-slate-300" /> : null}
+              <button
+                className={`inline-flex items-center rounded-full px-2 py-1 text-left transition ${
+                  isActive
+                    ? 'text-slate-900'
+                    : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                }`}
+                onClick={() => {
+                  onSelect(segment.path);
+                  setOpenKey(null);
+                }}
+                title={segment.path ?? '/'}
+                type="button"
+              >
+                <span className="font-normal">{segment.label}</span>
+              </button>
 
-              <div className="relative">
-                <button
-                  aria-expanded={isOpen}
-                  className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-left transition ${
-                    isActive
-                      ? 'bg-sky-50 text-sky-700 ring-1 ring-sky-200'
-                      : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-                  }`}
-                  onClick={() => setOpenKey((current) => (current === segment.key ? null : segment.key))}
-                  title={segment.path ?? '/'}
-                  type="button"
-                >
-                  <span className="font-medium">{segment.label}</span>
-                  <ChevronDownIcon className="h-3.5 w-3.5 shrink-0" />
-                </button>
+              {hasDropdown ? (
+                <div className="relative">
+                  <button
+                    aria-expanded={isOpen}
+                    className="inline-flex items-center rounded-full p-1 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+                    onClick={() => setOpenKey((current) => (current === segment.key ? null : segment.key))}
+                    title={`Show child tags for ${segment.path ?? '/'}`}
+                    type="button"
+                  >
+                    <ChevronRightIcon className="h-4 w-4" />
+                  </button>
 
-                {isOpen ? (
-                  <div className="absolute left-0 top-[calc(100%+0.5rem)] z-20 min-w-[14rem] max-w-[min(20rem,80vw)] overflow-hidden rounded-2xl border border-slate-200 bg-white p-1.5 shadow-lg shadow-slate-200/70">
-                    <div className="max-h-72 overflow-auto">
-                      {segment.path === null ? (
-                        <>
-                          <DropdownItem active={selectedPath === null} label="/" onClick={() => {
-                            onSelect(null);
-                            setOpenKey(null);
-                          }} />
-                          {segment.options.length > 0 ? <div className="my-1 border-t border-slate-100" /> : null}
-                        </>
-                      ) : null}
+                  {isOpen ? (
+                    <div className="absolute left-0 top-[calc(100%+0.5rem)] z-20 min-w-[14rem] max-w-[min(20rem,80vw)] overflow-hidden rounded-2xl border border-slate-200 bg-white p-1.5 shadow-lg shadow-slate-200/70">
+                      <div className="max-h-72 overflow-auto">
+                        {segment.path === null ? (
+                          <>
+                            <DropdownItem active={selectedPath === null} label="/" onClick={() => {
+                              onSelect(null);
+                              setOpenKey(null);
+                            }} />
+                            {segment.options.length > 0 ? <div className="my-1 border-t border-slate-100" /> : null}
+                          </>
+                        ) : null}
 
-                      {segment.options.length === 0 ? (
-                        <div className="px-3 py-2 text-xs text-slate-400">No tags found.</div>
-                      ) : (
-                        segment.options.map((option) => (
+                        {segment.options.map((option) => (
                           <DropdownItem
                             active={selectedPath === option.path}
                             key={option.path}
@@ -559,12 +595,12 @@ function TagBreadcrumb({
                             }}
                             title={option.path}
                           />
-                        ))
-                      )}
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                ) : null}
-              </div>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
           );
         })}
@@ -586,8 +622,8 @@ function DropdownItem({
 }) {
   return (
     <button
-      className={`flex w-full items-center rounded-xl px-3 py-2 text-left text-sm transition ${
-        active ? 'bg-sky-50 text-sky-700' : 'text-slate-700 hover:bg-slate-50 hover:text-slate-900'
+      className={`flex w-full items-center rounded-xl px-3 py-2 text-left text-base font-normal transition ${
+        active ? 'text-slate-900' : 'text-slate-700 hover:bg-slate-50 hover:text-slate-900'
       }`}
       onClick={onClick}
       title={title ?? label}
@@ -622,7 +658,12 @@ function buildBreadcrumbSegments(nodes: TreeNode[], selectedPath: string | null)
       key: path,
       label: parts[index],
       path,
-      options: currentNode ? flattenNodes([currentNode]) : [],
+      options: currentNode
+        ? currentNode.children.map((child) => ({
+            label: child.name,
+            path: child.path,
+          }))
+        : [],
     });
   }
 
@@ -819,12 +860,12 @@ function splitTagsForSave(value: string): string[] {
 
 function toneClassName(tone: StatusTone): string {
   if (tone === 'success') {
-    return 'text-emerald-700';
+    return 'border-emerald-200 bg-emerald-50/90 text-emerald-800 shadow-emerald-100/80';
   }
   if (tone === 'error') {
-    return 'text-rose-700';
+    return 'border-rose-200 bg-rose-50/90 text-rose-800 shadow-rose-100/80';
   }
-  return 'text-slate-500';
+  return 'border-slate-200 bg-white/90 text-slate-700 shadow-slate-200/80';
 }
 
 function getErrorMessage(error: unknown): string {

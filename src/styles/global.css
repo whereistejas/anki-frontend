@@ -22,6 +22,8 @@ body {
   overflow: hidden;
   background: #f8fafc;
   color: #0f172a;
+  font-size: 16px;
+  font-weight: 400;
 }
 
 * {
@@ -91,7 +93,17 @@ textarea {
 .card-html h5,
 .card-html h6 {
   margin: 0.5rem 0;
-  font-weight: 600;
+  font-weight: 400;
+}
+
+.card-html strong,
+.card-html b {
+  font-weight: 700;
+}
+
+.card-html em,
+.card-html i {
+  font-style: italic;
 }
 
 .card-html code {
@@ -123,28 +135,34 @@ textarea {
   will-change: transform;
 }
 
-@media (min-width: 900px) {
+@media (min-width: 768px) {
   .masonry-grid {
     columns: 2;
   }
 }
 
-@media (min-width: 1320px) {
+@media (min-width: 1024px) {
+  .masonry-grid {
+    columns: 3;
+  }
+}
+
+@media (min-width: 1280px) {
   .masonry-grid {
     columns: 4;
   }
 }
 
-@media (min-width: 1200px) {
+@media (min-width: 1280px) {
   .masonry-grid-wide {
     columns: 4;
   }
 }
 
 .card-panel-content {
-  font-size: 0.8125rem;
+  font-size: 16px;
   font-weight: 400;
-  line-height: 1.15rem;
+  line-height: 1.5;
   color: #1e293b;
 }
 
@@ -188,9 +206,9 @@ textarea {
 .cm-minimal .cm-content,
 .cm-minimal .cm-line,
 .cm-minimal .cm-placeholder {
-  font-size: 0.8125rem;
+  font-size: 16px;
   font-weight: 400;
-  line-height: 1.15rem;
+  line-height: 1.5;
 }
 
 .cm-math-widget {
@@ -245,8 +263,8 @@ textarea {
   }
 
   .card-panel-content {
-    font-size: 0.875rem;
-    line-height: 1.25rem;
+    font-size: 16px;
+    line-height: 1.5;
   }
 
   .card-panel-front {
@@ -254,7 +272,7 @@ textarea {
   }
 
   .card-panel-back {
-    padding: 1.25rem 1.4rem 3.75rem;
+    padding: 1.25rem 1.4rem 3rem;
   }
 
   .cm-card-front .cm-content,
@@ -264,14 +282,14 @@ textarea {
 
   .cm-card-back .cm-content,
   .cm-card-back .cm-gutter {
-    padding: 1.25rem 1.4rem 3.75rem;
+    padding: 1.25rem 1.4rem 3rem;
   }
 
   .cm-minimal .cm-content,
   .cm-minimal .cm-line,
   .cm-minimal .cm-placeholder {
-    font-size: 0.875rem;
-    line-height: 1.25rem;
+    font-size: 16px;
+    line-height: 1.5;
   }
 }
 
@@ -288,25 +306,25 @@ textarea {
     margin-bottom: 0;
   }
 
-  @media (min-width: 900px) {
+  @media (min-width: 768px) {
     .masonry-grid {
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
   }
 
-  @media (min-width: 1320px) {
+  @media (min-width: 1024px) {
     .masonry-grid {
       grid-template-columns: repeat(3, minmax(0, 1fr));
     }
   }
 
-  @media (min-width: 1680px) {
+  @media (min-width: 1280px) {
     .masonry-grid {
       grid-template-columns: repeat(4, minmax(0, 1fr));
     }
   }
 
-  @media (min-width: 1200px) {
+  @media (min-width: 1280px) {
     .masonry-grid-wide {
       grid-template-columns: repeat(4, minmax(0, 1fr));
     }
