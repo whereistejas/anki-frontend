@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeftIcon, ChevronRightIcon, PlusCircledIcon } from '@radix-ui/react-icons';
+import { ChevronDownIcon, ChevronRightIcon, PlusCircledIcon } from '@radix-ui/react-icons';
 import { LayoutGroup, motion } from 'framer-motion';
 import { fetchCardsPage, fetchNotesInfo, invokeAnki, type CardInfo, type NoteInfo } from '../lib/ankiconnect';
-import { buildHierarchy, quoteSearchValue } from '../lib/tree';
+import { buildHierarchy, quoteSearchValue, type TreeNode } from '../lib/tree';
 import { htmlToMarkdown, markdownToHtml } from '../lib/markdown';
 import CardTile from './CardTile';
-import TreeView from './TreeView';
 
 type CardStateFilter = 'all' | 'new' | 'learn' | 'review' | 'due' | 'suspended' | 'buried';
 type FlagFilter = 'all' | '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7';
@@ -16,14 +15,32 @@ interface PageCard {
   note: NoteInfo | null;
 }
 
+interface LocalPageCard {
+  card: CardInfo;
+  note: NoteInfo;
+}
+
 interface NoteDraft {
   fields: Record<string, string>;
   tags: string;
 }
 
+interface BreadcrumbOption {
+  label: string;
+  path: string;
+}
+
+interface BreadcrumbSegment {
+  key: string;
+  label: string;
+  path: string | null;
+  options: BreadcrumbOption[];
+}
+
 const DEFAULT_ENDPOINT = 'http://127.0.0.1:8765';
 const POLL_INTERVAL_MS = 15_000;
 const AUTOSAVE_DELAY_MS = 800;
+const ROOT_BREADCRUMB_KEY = '__root__';
 
 export default function App() {
   const endpoint = DEFAULT_ENDPOINT;
@@ -33,10 +50,7 @@ export default function App() {
   const flagFilter: FlagFilter = 'all';
   const pageSize = 48;
   const [pageCards, setPageCards] = useState<PageCard[]>([]);
-  const [tagPaneWidth, setTagPaneWidth] = useState(240);
-  const [isCompactLayout, setIsCompactLayout] = useState(false);
-  const [isResizingTagPane, setIsResizingTagPane] = useState(false);
-  const [isTagPaneCollapsed, setIsTagPaneCollapsed] = useState(false);
+  const [localPageCards, setLocalPageCards] = useState<LocalPageCard[]>([]);
   const [noteDrafts, setNoteDrafts] = useState<Record<number, NoteDraft>>({});
   const [noteSnapshots, setNoteSnapshots] = useState<Record<number, string>>({});
   const [savingNoteIds, setSavingNoteIds] = useState<Record<number, boolean>>({});
@@ -47,12 +61,14 @@ export default function App() {
 
   const noteDraftsRef = useRef(noteDrafts);
   const noteSnapshotsRef = useRef(noteSnapshots);
+  const localPageCardsRef = useRef(localPageCards);
   const autosaveTimersRef = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
-  const resizingTagPaneRef = useRef(false);
-  const layoutRef = useRef<HTMLDivElement | null>(null);
+  const nextTempNoteIdRef = useRef(-1);
+  const nextTempCardIdRef = useRef(-1);
 
   const query = useMemo(() => buildQuery({ flagFilter, selectedTag, stateFilter }), [flagFilter, selectedTag, stateFilter]);
   const tagTree = useMemo(() => buildHierarchy(expandHierarchicalPaths(tags)), [tags]);
+  const visiblePageCards = useMemo(() => [...localPageCards, ...pageCards], [localPageCards, pageCards]);
 
   useEffect(() => {
     noteDraftsRef.current = noteDrafts;
@@ -61,6 +77,10 @@ export default function App() {
   useEffect(() => {
     noteSnapshotsRef.current = noteSnapshots;
   }, [noteSnapshots]);
+
+  useEffect(() => {
+    localPageCardsRef.current = localPageCards;
+  }, [localPageCards]);
 
   useEffect(() => {
     void refreshCollection(true);
@@ -75,44 +95,7 @@ export default function App() {
   }, [pageSize, query]);
 
   useEffect(() => {
-    const mediaQuery = window.matchMedia('(max-width: 900px)');
-    const updateLayout = () => setIsCompactLayout(mediaQuery.matches);
-    updateLayout();
-    mediaQuery.addEventListener('change', updateLayout);
-    return () => mediaQuery.removeEventListener('change', updateLayout);
-  }, []);
-
-  useEffect(() => {
-    const onPointerMove = (event: PointerEvent) => {
-      if (!resizingTagPaneRef.current || !layoutRef.current || isCompactLayout) {
-        return;
-      }
-
-      const bounds = layoutRef.current.getBoundingClientRect();
-      const nextWidth = event.clientX - bounds.left;
-      setTagPaneWidth(Math.min(420, Math.max(180, Math.round(nextWidth))));
-    };
-
-    const stopResize = () => {
-      resizingTagPaneRef.current = false;
-      setIsResizingTagPane(false);
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-    };
-
-    window.addEventListener('pointermove', onPointerMove);
-    window.addEventListener('pointerup', stopResize);
-    window.addEventListener('pointercancel', stopResize);
-
-    return () => {
-      window.removeEventListener('pointermove', onPointerMove);
-      window.removeEventListener('pointerup', stopResize);
-      window.removeEventListener('pointercancel', stopResize);
-    };
-  }, [isCompactLayout]);
-
-  useEffect(() => {
-    for (const pageCard of pageCards) {
+    for (const pageCard of visiblePageCards) {
       if (!pageCard.note) {
         continue;
       }
@@ -132,6 +115,10 @@ export default function App() {
 
       autosaveTimersRef.current[noteId] = window.setTimeout(() => {
         delete autosaveTimersRef.current[noteId];
+        if (noteId < 0) {
+          void persistLocalNote(noteId);
+          return;
+        }
         void persistNote(noteId);
       }, AUTOSAVE_DELAY_MS);
     }
@@ -142,7 +129,7 @@ export default function App() {
       }
       autosaveTimersRef.current = {};
     };
-  }, [noteDrafts, noteSnapshots, pageCards, savingNoteIds]);
+  }, [noteDrafts, noteSnapshots, savingNoteIds, visiblePageCards]);
 
   async function refreshCollection(initial: boolean) {
     setLoading(initial);
@@ -275,6 +262,11 @@ export default function App() {
   }
 
   async function deleteNote(noteId: number) {
+    if (noteId < 0) {
+      removeLocalDraft(noteId);
+      return;
+    }
+
     if (!window.confirm('Delete this note and all of its cards?')) {
       return;
     }
@@ -307,43 +299,88 @@ export default function App() {
     setCreatingCard(true);
 
     try {
-      let modelName: string | undefined;
-      let fieldNames: string[] = [];
-
-      const firstVisibleNote = pageCards.find((pageCard) => pageCard.note)?.note;
-      if (firstVisibleNote) {
-        modelName = firstVisibleNote.modelName;
-        fieldNames = Object.keys(firstVisibleNote.fields);
-      } else {
-        const modelNames = await invokeAnki<string[]>(endpoint, 'modelNames');
-        modelName = modelNames[0];
-        if (!modelName) {
-          throw new Error('No note type available to create a card.');
-        }
-        fieldNames = await invokeAnki<string[]>(endpoint, 'modelFieldNames', { modelName });
-      }
-
-      const deckNames = await invokeAnki<string[]>(endpoint, 'deckNames');
-      const deckName = pageCards[0]?.card.deckName ?? deckNames[0] ?? 'Default';
-      const fields = Object.fromEntries(fieldNames.map((fieldName) => [fieldName, '']));
-      const tags = selectedTag ? [selectedTag] : [];
-
-      await invokeAnki<number>(endpoint, 'addNote', {
-        note: {
-          deckName,
-          fields,
-          modelName,
-          tags,
-        },
+      const template = await getNewCardTemplate({
+        endpoint,
+        selectedTag,
+        visiblePageCards,
       });
+      const noteId = nextTempNoteIdRef.current;
+      const cardId = nextTempCardIdRef.current;
+      nextTempNoteIdRef.current -= 1;
+      nextTempCardIdRef.current -= 1;
 
-      setStatus({ text: 'Card added.', tone: 'success' });
-      await refreshCollection(false);
+      const localPageCard = buildLocalPageCard({
+        cardId,
+        deckName: template.deckName,
+        fieldNames: template.fieldNames,
+        modelName: template.modelName,
+        noteId,
+        tags: template.tags,
+      });
+      const draft = noteToDraft(localPageCard.note);
+      const snapshot = serializeDraft(draft);
+
+      setLocalPageCards((current) => [localPageCard, ...current]);
+      setNoteDrafts((current) => ({ ...current, [noteId]: draft }));
+      setNoteSnapshots((current) => ({ ...current, [noteId]: snapshot }));
+      setStatus({ text: 'New card ready. Start typing to save it.', tone: 'success' });
     } catch (error) {
       setStatus({ text: getErrorMessage(error), tone: 'error' });
     } finally {
       setCreatingCard(false);
     }
+  }
+
+  async function persistLocalNote(noteId: number) {
+    const localPageCard = localPageCardsRef.current.find((pageCard) => pageCard.note.noteId === noteId);
+    const draft = noteDraftsRef.current[noteId];
+
+    if (!localPageCard || !draft) {
+      return;
+    }
+
+    const fieldNames = getOrderedFieldNames(localPageCard.note);
+    const firstFieldName = fieldNames[0];
+    const hasContent = Object.values(draft.fields).some((value) => value.trim().length > 0) || draft.tags.trim().length > 0;
+
+    if (!hasContent || !firstFieldName || !draft.fields[firstFieldName]?.trim()) {
+      return;
+    }
+
+    setSavingNoteIds((current) => ({ ...current, [noteId]: true }));
+
+    try {
+      await invokeAnki<number>(endpoint, 'addNote', {
+        note: {
+          deckName: localPageCard.card.deckName,
+          fields: Object.fromEntries(
+            Object.entries(draft.fields).map(([fieldName, value]) => [fieldName, markdownToHtml(value)]),
+          ),
+          modelName: localPageCard.note.modelName,
+          tags: splitTagsForSave(draft.tags),
+        },
+      });
+
+      removeLocalDraft(noteId);
+      setStatus({ text: 'Card added.', tone: 'success' });
+      await refreshCollection(false);
+    } catch (error) {
+      setStatus({ text: getErrorMessage(error), tone: 'error' });
+      setSavingNoteIds((current) => ({ ...current, [noteId]: false }));
+    }
+  }
+
+  function removeLocalDraft(noteId: number) {
+    const timer = autosaveTimersRef.current[noteId];
+    if (timer) {
+      window.clearTimeout(timer);
+      delete autosaveTimersRef.current[noteId];
+    }
+
+    setLocalPageCards((current) => current.filter((pageCard) => pageCard.note.noteId !== noteId));
+    setNoteDrafts((current) => omitRecordKey(current, noteId));
+    setNoteSnapshots((current) => omitRecordKey(current, noteId));
+    setSavingNoteIds((current) => omitRecordKey(current, noteId));
   }
 
   function updateDraftField(noteId: number, fieldName: string, value: string) {
@@ -369,116 +406,59 @@ export default function App() {
     }));
   }
 
-  const layoutStyle = isCompactLayout
-    ? {
-        gridTemplateColumns: 'minmax(0, 1fr)',
-        gridTemplateRows: isTagPaneCollapsed ? '0 minmax(0, 1fr)' : '12rem minmax(0, 1fr)',
-      }
-    : {
-        gridTemplateColumns: isTagPaneCollapsed ? 'minmax(0, 1fr)' : `${tagPaneWidth}px 1rem minmax(0, 1fr)`,
-      };
-
   return (
     <main className="h-screen overflow-hidden bg-slate-50 text-slate-900">
       <div className="mx-auto flex h-full max-w-[1720px] flex-col gap-2 md:gap-3">
-        <div className="grid min-h-0 flex-1 gap-0 transition-[grid-template-columns,grid-template-rows] duration-200" ref={layoutRef} style={layoutStyle}>
-          {!isTagPaneCollapsed ? (
-            <aside
-              className={`flex min-h-0 flex-col overflow-hidden ${isCompactLayout ? 'pl-2 pt-3 pb-2' : 'pl-2 pt-5 pb-2 md:pl-5 md:pb-5'}`}
-            >
-              <TreeView
-                emptyLabel="No tags found."
-                nodes={tagTree}
-                onSelect={setSelectedTag}
-                selectedPath={selectedTag}
-                title="Tags"
-              />
-            </aside>
-          ) : null}
+        <section className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <div className="px-2 pt-1.5 md:px-5 md:pt-4">
+            <div className="flex flex-wrap items-center gap-2.5 px-0.5 py-0.5 md:px-0">
+              <TagBreadcrumb nodes={tagTree} onSelect={setSelectedTag} selectedPath={selectedTag} />
 
-          {!isCompactLayout && !isTagPaneCollapsed ? (
-            <div
-              aria-label="Resize tags panel"
-              className="group flex min-h-0 cursor-col-resize items-stretch justify-center"
-              onPointerDown={(event) => {
-                event.preventDefault();
-                resizingTagPaneRef.current = true;
-                setIsResizingTagPane(true);
-                document.body.style.cursor = 'col-resize';
-                document.body.style.userSelect = 'none';
-              }}
-              role="separator"
-            >
-              <div
-                className={`w-[0.24rem] rounded-full bg-slate-300 transition-opacity ${
-                  isResizingTagPane ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-                }`}
-              />
-            </div>
-          ) : null}
-
-          <section className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
               <button
-                aria-label={isTagPaneCollapsed ? 'Show tags panel' : 'Hide tags panel'}
-                aria-pressed={!isTagPaneCollapsed}
-                className="absolute left-2 top-2 z-10 inline-flex items-center rounded-full bg-white/90 p-1.5 text-slate-500 shadow-sm ring-1 ring-slate-200 backdrop-blur transition hover:text-slate-900 md:left-5 md:top-5"
-                onClick={() => setIsTagPaneCollapsed((current) => !current)}
-                title={isTagPaneCollapsed ? 'Show tags panel' : 'Hide tags panel'}
+                aria-label="Add new card"
+                className="inline-flex items-center gap-1.5 rounded-full bg-slate-900 px-2.5 py-1 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
+                disabled={creatingCard}
+                onClick={() => void createNewCard()}
+                title="Add new card"
                 type="button"
               >
-                {isTagPaneCollapsed ? (
-                  <ChevronRightIcon className="h-4 w-4 md:h-5 md:w-5" />
-                ) : (
-                  <ChevronLeftIcon className="h-4 w-4 md:h-5 md:w-5" />
-                )}
+                <PlusCircledIcon className="h-4 w-4" />
+                <span>New card</span>
               </button>
-              {pageCards.length === 0 ? (
-                <div className="grid min-h-0 flex-1 place-items-center text-sm text-slate-400">
-                  {loading ? 'Loading cards…' : 'No cards match the current filters.'}
-                </div>
-              ) : (
-                <>
-                  <button
-                    aria-label="Add new card"
-                    className="absolute right-2 top-2 z-10 inline-flex items-center rounded-full bg-white/90 text-slate-500 shadow-sm ring-1 ring-slate-200 backdrop-blur transition hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-40 md:right-5 md:top-5"
-                    disabled={creatingCard}
-                    onClick={() => void createNewCard()}
-                    title="Add new card"
-                    type="button"
-                  >
-                    <PlusCircledIcon className="h-6 w-6 md:h-8 md:w-8" />
-                  </button>
-                  <div className="scrollbar-hidden min-h-0 flex-1 overflow-auto px-2 pt-2 pb-2 md:px-5 md:pt-5 md:pb-5">
-                    <LayoutGroup>
-                      <motion.div
-                        className={`masonry-grid ${isTagPaneCollapsed && !isCompactLayout ? 'masonry-grid-wide' : ''}`}
-                        layout
-                        transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
-                      >
-                        {pageCards.map((pageCard) => (
-                          <CardTile
-                            availableTags={tags}
-                            card={pageCard.card}
-                            endpoint={endpoint}
-                            draft={pageCard.note ? noteDrafts[pageCard.note.noteId] ?? null : null}
-                            key={pageCard.card.cardId}
-                            note={pageCard.note}
-                            onDelete={deleteNote}
-                            onFieldChange={updateDraftField}
-                            onOpen={openInBrowser}
-                            onSuspend={setSuspended}
-                            onTagsChange={updateDraftTags}
-                            saving={pageCard.note ? Boolean(savingNoteIds[pageCard.note.noteId]) : false}
-                            working={Boolean(workingCardIds[pageCard.card.cardId])}
-                          />
-                        ))}
-                      </motion.div>
-                    </LayoutGroup>
-                  </div>
-                </>
-              )}
-          </section>
-        </div>
+            </div>
+          </div>
+
+          {visiblePageCards.length === 0 ? (
+            <div className="grid min-h-0 flex-1 place-items-center px-2 pb-2 text-sm text-slate-400 md:px-5 md:pb-5">
+              {loading ? 'Loading cards…' : 'No cards match the current filters.'}
+            </div>
+          ) : (
+            <div className="scrollbar-hidden min-h-0 flex-1 overflow-auto px-2 pt-3 pb-2 md:px-5 md:pt-4 md:pb-5">
+              <LayoutGroup>
+                <motion.div className="masonry-grid" layout transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}>
+                  {visiblePageCards.map((pageCard) => (
+                    <CardTile
+                      availableTags={tags}
+                      card={pageCard.card}
+                      endpoint={endpoint}
+                      draft={pageCard.note ? noteDrafts[pageCard.note.noteId] ?? null : null}
+                      isPending={pageCard.note?.noteId ? pageCard.note.noteId < 0 : false}
+                      key={pageCard.card.cardId}
+                      note={pageCard.note}
+                      onDelete={deleteNote}
+                      onFieldChange={updateDraftField}
+                      onOpen={openInBrowser}
+                      onSuspend={setSuspended}
+                      onTagsChange={updateDraftTags}
+                      saving={pageCard.note ? Boolean(savingNoteIds[pageCard.note.noteId]) : false}
+                      working={pageCard.note?.noteId ? pageCard.note.noteId < 0 ? false : Boolean(workingCardIds[pageCard.card.cardId]) : false}
+                    />
+                  ))}
+                </motion.div>
+              </LayoutGroup>
+            </div>
+          )}
+        </section>
 
         {status ? (
           <div className={`px-2 pb-2 text-xs ${toneClassName(status.tone)} md:px-5 md:pb-3`}>
@@ -488,6 +468,198 @@ export default function App() {
       </div>
     </main>
   );
+}
+
+function TagBreadcrumb({
+  nodes,
+  onSelect,
+  selectedPath,
+}: {
+  nodes: TreeNode[];
+  onSelect: (path: string | null) => void;
+  selectedPath: string | null;
+}) {
+  const [openKey, setOpenKey] = useState<string | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const segments = useMemo(() => buildBreadcrumbSegments(nodes, selectedPath), [nodes, selectedPath]);
+
+  useEffect(() => {
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        setOpenKey(null);
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setOpenKey(null);
+      }
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
+
+  return (
+    <div className="min-w-0 flex-1" ref={rootRef}>
+      <div className="flex flex-wrap items-center gap-1 text-sm">
+        {segments.map((segment, index) => {
+          const isOpen = openKey === segment.key;
+          const isActive = selectedPath === segment.path || (!selectedPath && segment.path === null);
+
+          return (
+            <div className="flex items-center gap-1" key={segment.key}>
+              {index > 0 ? <ChevronRightIcon className="h-3.5 w-3.5 text-slate-300" /> : null}
+
+              <div className="relative">
+                <button
+                  aria-expanded={isOpen}
+                  className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-left transition ${
+                    isActive
+                      ? 'bg-sky-50 text-sky-700 ring-1 ring-sky-200'
+                      : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                  }`}
+                  onClick={() => setOpenKey((current) => (current === segment.key ? null : segment.key))}
+                  title={segment.path ?? '/'}
+                  type="button"
+                >
+                  <span className="font-medium">{segment.label}</span>
+                  <ChevronDownIcon className="h-3.5 w-3.5 shrink-0" />
+                </button>
+
+                {isOpen ? (
+                  <div className="absolute left-0 top-[calc(100%+0.5rem)] z-20 min-w-[14rem] max-w-[min(20rem,80vw)] overflow-hidden rounded-2xl border border-slate-200 bg-white p-1.5 shadow-lg shadow-slate-200/70">
+                    <div className="max-h-72 overflow-auto">
+                      {segment.path === null ? (
+                        <>
+                          <DropdownItem active={selectedPath === null} label="/" onClick={() => {
+                            onSelect(null);
+                            setOpenKey(null);
+                          }} />
+                          {segment.options.length > 0 ? <div className="my-1 border-t border-slate-100" /> : null}
+                        </>
+                      ) : null}
+
+                      {segment.options.length === 0 ? (
+                        <div className="px-3 py-2 text-xs text-slate-400">No tags found.</div>
+                      ) : (
+                        segment.options.map((option) => (
+                          <DropdownItem
+                            active={selectedPath === option.path}
+                            key={option.path}
+                            label={option.label}
+                            onClick={() => {
+                              onSelect(option.path);
+                              setOpenKey(null);
+                            }}
+                            title={option.path}
+                          />
+                        ))
+                      )}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function DropdownItem({
+  active,
+  label,
+  onClick,
+  title,
+}: {
+  active: boolean;
+  label: string;
+  onClick: () => void;
+  title?: string;
+}) {
+  return (
+    <button
+      className={`flex w-full items-center rounded-xl px-3 py-2 text-left text-sm transition ${
+        active ? 'bg-sky-50 text-sky-700' : 'text-slate-700 hover:bg-slate-50 hover:text-slate-900'
+      }`}
+      onClick={onClick}
+      title={title ?? label}
+      type="button"
+    >
+      <span className="truncate">{label}</span>
+    </button>
+  );
+}
+
+function buildBreadcrumbSegments(nodes: TreeNode[], selectedPath: string | null): BreadcrumbSegment[] {
+  const segments: BreadcrumbSegment[] = [
+    {
+      key: ROOT_BREADCRUMB_KEY,
+      label: '/',
+      path: null,
+      options: flattenNodes(nodes),
+    },
+  ];
+
+  if (!selectedPath) {
+    return segments;
+  }
+
+  const parts = selectedPath.split('::').filter(Boolean);
+
+  for (let index = 0; index < parts.length; index += 1) {
+    const path = parts.slice(0, index + 1).join('::');
+    const currentNode = findNodeByPath(nodes, path);
+
+    segments.push({
+      key: path,
+      label: parts[index],
+      path,
+      options: currentNode ? flattenNodes([currentNode]) : [],
+    });
+  }
+
+  return segments;
+}
+
+function flattenNodes(nodes: TreeNode[]): BreadcrumbOption[] {
+  const options: BreadcrumbOption[] = [];
+
+  const visit = (items: TreeNode[]) => {
+    for (const item of items) {
+      options.push({
+        label: item.path,
+        path: item.path,
+      });
+      visit(item.children);
+    }
+  };
+
+  visit(nodes);
+  return options;
+}
+
+function findNodeByPath(nodes: TreeNode[], path: string): TreeNode | null {
+  const parts = path.split('::').filter(Boolean);
+  let currentNodes = nodes;
+  let currentNode: TreeNode | null = null;
+
+  for (const part of parts) {
+    currentNode = currentNodes.find((node) => node.name === part) ?? null;
+    if (!currentNode) {
+      return null;
+    }
+    currentNodes = currentNode.children;
+  }
+
+  return currentNode;
 }
 
 function buildQuery({
@@ -530,6 +702,97 @@ function expandHierarchicalPaths(paths: string[]): string[] {
   }
 
   return [...expanded];
+}
+
+function getOrderedFieldNames(note: NoteInfo): string[] {
+  return Object.entries(note.fields)
+    .sort((left, right) => left[1].order - right[1].order)
+    .map(([name]) => name);
+}
+
+function buildLocalPageCard({
+  cardId,
+  deckName,
+  fieldNames,
+  modelName,
+  noteId,
+  tags,
+}: {
+  cardId: number;
+  deckName: string;
+  fieldNames: string[];
+  modelName: string;
+  noteId: number;
+  tags: string[];
+}): LocalPageCard {
+  const fields = Object.fromEntries(fieldNames.map((fieldName, index) => [fieldName, { order: index, value: '' }]));
+
+  return {
+    card: {
+      answer: '',
+      cardId,
+      deckName,
+      due: 0,
+      fields,
+      lapses: 0,
+      modelName,
+      note: noteId,
+      ord: 0,
+      question: '',
+      queue: 0,
+      reps: 0,
+      type: 0,
+    },
+    note: {
+      cards: [],
+      fields,
+      modelName,
+      noteId,
+      tags,
+    },
+  };
+}
+
+async function getNewCardTemplate({
+  endpoint,
+  selectedTag,
+  visiblePageCards,
+}: {
+  endpoint: string;
+  selectedTag: string | null;
+  visiblePageCards: Array<PageCard | LocalPageCard>;
+}): Promise<{ deckName: string; fieldNames: string[]; modelName: string; tags: string[] }> {
+  let modelName: string | undefined;
+  let fieldNames: string[] = [];
+
+  const firstVisibleNote = visiblePageCards.find((pageCard) => pageCard.note)?.note;
+  if (firstVisibleNote) {
+    modelName = firstVisibleNote.modelName;
+    fieldNames = getOrderedFieldNames(firstVisibleNote);
+  } else {
+    const modelNames = await invokeAnki<string[]>(endpoint, 'modelNames');
+    modelName = modelNames[0];
+    if (!modelName) {
+      throw new Error('No note type available to create a card.');
+    }
+    fieldNames = await invokeAnki<string[]>(endpoint, 'modelFieldNames', { modelName });
+  }
+
+  const deckNames = await invokeAnki<string[]>(endpoint, 'deckNames');
+  const deckName = visiblePageCards[0]?.card.deckName ?? deckNames[0] ?? 'Default';
+
+  return {
+    deckName,
+    fieldNames,
+    modelName,
+    tags: selectedTag ? [selectedTag] : [],
+  };
+}
+
+function omitRecordKey<T>(record: Record<number, T>, key: number): Record<number, T> {
+  const next = { ...record };
+  delete next[key];
+  return next;
 }
 
 function noteToDraft(note: NoteInfo): NoteDraft {
