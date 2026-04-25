@@ -1,5 +1,7 @@
 @import '@fontsource/inter';
 @import 'katex/dist/katex.min.css';
+@import 'react-grid-layout/css/styles.css';
+@import 'react-resizable/css/styles.css';
 
 @tailwind base;
 @tailwind components;
@@ -125,38 +127,39 @@ textarea {
 }
 
 .masonry-grid {
-  column-gap: 0.75rem;
-  columns: 1;
+  min-height: 100%;
+}
+
+.grid-card-item {
+  height: 100%;
 }
 
 .masonry-item {
-  break-inside: avoid;
-  margin-bottom: 0.75rem;
+  min-width: 0;
   will-change: transform;
 }
 
-@media (min-width: 768px) {
-  .masonry-grid {
-    columns: 2;
-  }
+.react-grid-layout {
+  position: relative;
+  transition: height 240ms ease;
 }
 
-@media (min-width: 1024px) {
-  .masonry-grid {
-    columns: 3;
-  }
+.react-grid-item {
+  transition: transform 240ms ease, box-shadow 240ms ease;
 }
 
-@media (min-width: 1280px) {
-  .masonry-grid {
-    columns: 4;
-  }
+.react-grid-item.react-grid-placeholder {
+  border-radius: 1.1rem;
+  background: rgba(125, 211, 252, 0.18);
+  border: 1px solid rgba(56, 189, 248, 0.28);
 }
 
-@media (min-width: 1280px) {
-  .masonry-grid-wide {
-    columns: 4;
-  }
+.react-grid-item.react-draggable-dragging {
+  z-index: 40;
+}
+
+.react-grid-item > .react-resizable-handle {
+  display: none;
 }
 
 .card-panel-content {
@@ -167,11 +170,11 @@ textarea {
 }
 
 .card-panel-front {
-  padding: 0.9rem 1rem;
+  padding: 0.9rem 1rem 0;
 }
 
 .card-panel-back {
-  padding: 0.9rem 1rem 3rem;
+  padding: 0.9rem 1rem 0;
 }
 
 .cm-minimal .cm-editor {
@@ -195,12 +198,12 @@ textarea {
 
 .cm-card-front .cm-content,
 .cm-card-front .cm-gutter {
-  padding: 0.9rem 1rem;
+  padding: 0.9rem 1rem 0;
 }
 
 .cm-card-back .cm-content,
 .cm-card-back .cm-gutter {
-  padding: 0.9rem 1rem 3rem;
+  padding: 0.9rem 1rem 0;
 }
 
 .cm-minimal .cm-content,
@@ -255,11 +258,7 @@ textarea {
   }
 
   .masonry-grid {
-    column-gap: 1rem;
-  }
-
-  .masonry-item {
-    margin-bottom: 1rem;
+    gap: 1rem;
   }
 
   .card-panel-content {
@@ -268,21 +267,21 @@ textarea {
   }
 
   .card-panel-front {
-    padding: 1.25rem 1.4rem;
+    padding: 1.25rem 1.4rem 0;
   }
 
   .card-panel-back {
-    padding: 1.25rem 1.4rem 3rem;
+    padding: 1.25rem 1.4rem 0;
   }
 
   .cm-card-front .cm-content,
   .cm-card-front .cm-gutter {
-    padding: 1.25rem 1.4rem;
+    padding: 1.25rem 1.4rem 0;
   }
 
   .cm-card-back .cm-content,
   .cm-card-back .cm-gutter {
-    padding: 1.25rem 1.4rem 3rem;
+    padding: 1.25rem 1.4rem 0;
   }
 
   .cm-minimal .cm-content,
@@ -293,40 +292,3 @@ textarea {
   }
 }
 
-@supports (grid-template-rows: masonry) {
-  .masonry-grid {
-    display: grid;
-    columns: initial;
-    gap: 0.75rem;
-    grid-template-columns: 1fr;
-    grid-template-rows: masonry;
-  }
-
-  .masonry-item {
-    margin-bottom: 0;
-  }
-
-  @media (min-width: 768px) {
-    .masonry-grid {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-  }
-
-  @media (min-width: 1024px) {
-    .masonry-grid {
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-    }
-  }
-
-  @media (min-width: 1280px) {
-    .masonry-grid {
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-    }
-  }
-
-  @media (min-width: 1280px) {
-    .masonry-grid-wide {
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-    }
-  }
-}

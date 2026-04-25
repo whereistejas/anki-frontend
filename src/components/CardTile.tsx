@@ -1,12 +1,11 @@
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ButtonHTMLAttributes, type CSSProperties, type Ref } from 'react';
 import { createPortal } from 'react-dom';
-import { motion } from 'framer-motion';
 import CodeMirror from '@uiw/react-codemirror';
 import { markdown as markdownLanguage } from '@codemirror/lang-markdown';
 import { RangeSetBuilder } from '@codemirror/state';
 import type { EditorView as CodeMirrorEditorView } from '@codemirror/view';
 import { Decoration, EditorView, ViewPlugin, WidgetType } from '@codemirror/view';
-import { BookmarkIcon, Cross2Icon, CrossCircledIcon, OpenInNewWindowIcon, TrashIcon } from '@radix-ui/react-icons';
+import { BookmarkIcon, Cross2Icon, CrossCircledIcon, DragHandleDots2Icon, OpenInNewWindowIcon, TrashIcon } from '@radix-ui/react-icons';
 import katex from 'katex';
 import type { CardInfo, NoteInfo } from '../lib/ankiconnect';
 import { markdownToHtml } from '../lib/markdown';
@@ -21,8 +20,14 @@ interface NoteDraft {
 interface CardTileProps {
   availableTags: string[];
   card: CardInfo;
+  cardRef?: Ref<HTMLElement>;
+  cardStyle?: CSSProperties;
+  dragHandleProps?: ButtonHTMLAttributes<HTMLButtonElement>;
+  dragHandleRef?: Ref<HTMLButtonElement>;
   endpoint: string;
   draft: NoteDraft | null;
+  isDragOverlay?: boolean;
+  isDragging?: boolean;
   isPending?: boolean;
   note: NoteInfo | null;
   onDelete: (noteId: number) => void;
@@ -37,8 +42,14 @@ interface CardTileProps {
 function CardTile({
   availableTags,
   card,
+  cardRef,
+  cardStyle,
+  dragHandleProps,
+  dragHandleRef,
   endpoint,
   draft,
+  isDragOverlay = false,
+  isDragging = false,
   isPending = false,
   note,
   onDelete,
@@ -53,19 +64,32 @@ function CardTile({
   const hasBack = fieldNames.length > 1;
   const frontField = fieldNames[0];
   const backField = fieldNames[1];
-
   return (
-    <motion.article
-      animate={{ opacity: 1, scale: 1, y: 0 }}
-      className="group masonry-item overflow-hidden rounded-[1.1rem] border border-slate-300 bg-white shadow-[0_2px_8px_rgba(15,23,42,0.05)] transition-shadow hover:shadow-[0_5px_14px_rgba(15,23,42,0.08)] md:rounded-[1.4rem]"
-      exit={{ opacity: 0, scale: 0.98, y: 8 }}
-      initial={{ opacity: 0, scale: 0.98, y: 8 }}
-      layout
-      transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+    <article
+      className={`group relative masonry-item overflow-hidden rounded-[1.1rem] border border-slate-300 bg-white transition-[box-shadow,opacity,transform] md:rounded-[1.4rem] ${
+        isDragging || isDragOverlay
+          ? 'z-30 scale-[1.01] opacity-90 shadow-[0_14px_34px_rgba(15,23,42,0.16)] ring-1 ring-sky-200/80'
+          : 'shadow-[0_2px_8px_rgba(15,23,42,0.05)] hover:shadow-[0_5px_14px_rgba(15,23,42,0.08)]'
+      }`}
+      ref={cardRef}
+      style={cardStyle}
     >
+      <button
+        aria-label="Drag to reorder"
+        className={`card-drag-handle absolute right-3 top-3 z-20 inline-flex touch-none items-center rounded-full bg-white/90 p-1 text-slate-400 shadow-sm ring-1 ring-slate-200/80 backdrop-blur transition hover:text-slate-700 md:right-4 md:top-4 ${
+          isDragging || isDragOverlay ? 'cursor-grabbing opacity-100' : 'cursor-grab opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'
+        }`}
+        ref={dragHandleRef}
+        title="Drag to reorder"
+        type="button"
+        {...dragHandleProps}
+      >
+        <DragHandleDots2Icon className="h-4 w-4" />
+      </button>
+
       {note && draft && frontField ? (
         <>
-          <section className="min-h-[3rem]">
+          <section className="min-h-[3rem] pb-5">
             <FieldEditor
               endpoint={endpoint}
               panel="front"
@@ -77,7 +101,7 @@ function CardTile({
           {hasBack ? <div className="border-t border-slate-200" /> : null}
 
           {hasBack && backField ? (
-            <section className="relative min-h-[3rem]">
+            <section className="relative min-h-[3rem] pb-12">
               <FieldEditor
                 endpoint={endpoint}
                 panel="back"
@@ -99,7 +123,7 @@ function CardTile({
               />
             </section>
           ) : (
-            <section className="relative min-h-[3rem] border-t border-slate-200">
+            <section className="relative min-h-[3rem] border-t border-slate-200 pb-12">
               <div className="card-panel card-panel-back" />
               <CardActions
                 availableTags={availableTags}
@@ -120,7 +144,7 @@ function CardTile({
       ) : (
         <div className="p-4 text-base font-normal text-slate-400 md:p-5">Note details are not available for this card.</div>
       )}
-    </motion.article>
+    </article>
   );
 }
 
@@ -216,17 +240,18 @@ function FieldEditor({
   }, [isEditing]);
 
   const editorHeight = measuredHeight;
-  const panelClassName = panel === 'front' ? 'card-panel-front' : 'card-panel-back';
+  const contentPanelClassName = panel === 'front' ? 'card-panel-front' : 'card-panel-back';
+  const editorPanelClassName = panel === 'front' ? 'cm-card-front' : 'cm-card-back';
 
   return (
     <div className="relative h-full" ref={rootRef}>
       <div className="pointer-events-none absolute left-0 top-0 -z-10 w-full opacity-0">
         <div
-          className={`card-panel-content ${panelClassName} card-html`}
+          className={`card-panel-content ${contentPanelClassName} card-html`}
           dangerouslySetInnerHTML={{ __html: resolvedHtml }}
           ref={previewMeasureRef}
         />
-        <div className={`card-panel-content ${panelClassName} whitespace-pre-wrap break-words`} ref={sourceMeasureRef}>
+        <div className={`card-panel-content ${contentPanelClassName} whitespace-pre-wrap break-words`} ref={sourceMeasureRef}>
           {value || ' '}
         </div>
       </div>
@@ -240,7 +265,7 @@ function FieldEditor({
               highlightActiveLineGutter: false,
               lineNumbers: false,
             }}
-            className={`cm-minimal cm-card ${panelClassName}`}
+            className={`cm-minimal cm-card ${editorPanelClassName}`}
             extensions={editorExtensions}
             height="100%"
             onChange={onChange}
@@ -265,7 +290,7 @@ function FieldEditor({
           type="button"
         >
           <div
-            className={`card-panel-content ${panelClassName} card-html`}
+            className={`card-panel-content ${contentPanelClassName} card-html`}
             dangerouslySetInnerHTML={{ __html: resolvedHtml }}
           />
         </button>

@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ComponentProps } from 'react';
 import { ChevronRightIcon, PlusCircledIcon } from '@radix-ui/react-icons';
-import { AnimatePresence, LayoutGroup, motion } from 'framer-motion';
+import { AnimatePresence, motion } from 'framer-motion';
+import { type Layout, type Layouts } from 'react-grid-layout';
+import { Responsive, WidthProvider } from 'react-grid-layout/legacy';
 import { fetchCardsPage, fetchNotesInfo, invokeAnki, type CardInfo, type NoteInfo } from '../lib/ankiconnect';
 import { buildHierarchy, quoteSearchValue, type TreeNode } from '../lib/tree';
 import { htmlToMarkdown, markdownToHtml } from '../lib/markdown';
@@ -41,6 +43,24 @@ const DEFAULT_ENDPOINT = 'http://127.0.0.1:8765';
 const POLL_INTERVAL_MS = 15_000;
 const AUTOSAVE_DELAY_MS = 800;
 const ROOT_BREADCRUMB_KEY = '__root__';
+const GRID_ROW_HEIGHT = 12;
+const GRID_MARGIN: [number, number] = [16, 16];
+const GRID_PADDING: [number, number] = [0, 0];
+const GRID_MIN_ROWS = 6;
+const GRID_BREAKPOINTS = {
+  lg: 1280,
+  md: 1024,
+  sm: 768,
+  xs: 0,
+} as const;
+const GRID_COLS = {
+  lg: 4,
+  md: 3,
+  sm: 2,
+  xs: 1,
+} as const;
+
+const ResponsiveGridLayout = WidthProvider(Responsive);
 
 export default function App() {
   const endpoint = DEFAULT_ENDPOINT;
@@ -58,6 +78,9 @@ export default function App() {
   const [status, setStatus] = useState<{ text: string; tone: StatusTone } | null>(null);
   const [loading, setLoading] = useState(false);
   const [creatingCard, setCreatingCard] = useState(false);
+  const [orderedCardIds, setOrderedCardIds] = useState<number[]>([]);
+  const [activeCardId, setActiveCardId] = useState<number | null>(null);
+  const [cardHeights, setCardHeights] = useState<Record<number, number>>({});
 
   const noteDraftsRef = useRef(noteDrafts);
   const noteSnapshotsRef = useRef(noteSnapshots);
@@ -68,7 +91,12 @@ export default function App() {
 
   const query = useMemo(() => buildQuery({ flagFilter, selectedTag, stateFilter }), [flagFilter, selectedTag, stateFilter]);
   const tagTree = useMemo(() => buildHierarchy(expandHierarchicalPaths(tags)), [tags]);
-  const visiblePageCards = useMemo(() => [...localPageCards, ...pageCards], [localPageCards, pageCards]);
+  const combinedVisiblePageCards = useMemo(() => [...localPageCards, ...pageCards], [localPageCards, pageCards]);
+  const visiblePageCards = useMemo(
+    () => orderPageCards(combinedVisiblePageCards, orderedCardIds),
+    [combinedVisiblePageCards, orderedCardIds],
+  );
+  const layouts = useMemo(() => buildGridLayouts(visiblePageCards, cardHeights), [visiblePageCards, cardHeights]);
 
   useEffect(() => {
     noteDraftsRef.current = noteDrafts;
@@ -81,6 +109,31 @@ export default function App() {
   useEffect(() => {
     localPageCardsRef.current = localPageCards;
   }, [localPageCards]);
+
+  useEffect(() => {
+    const nextVisibleIds = combinedVisiblePageCards.map((pageCard) => pageCard.card.cardId);
+
+    setOrderedCardIds((current) => {
+      const visibleIdSet = new Set(nextVisibleIds);
+      const preserved = current.filter((cardId) => visibleIdSet.has(cardId));
+      const preservedSet = new Set(preserved);
+      const appended = nextVisibleIds.filter((cardId) => !preservedSet.has(cardId));
+      const next = [...preserved, ...appended];
+
+      return areCardOrdersEqual(current, next) ? current : next;
+    });
+  }, [combinedVisiblePageCards]);
+
+  useEffect(() => {
+    if (activeCardId == null) {
+      return;
+    }
+
+    const activeCardStillVisible = combinedVisiblePageCards.some((pageCard) => pageCard.card.cardId === activeCardId);
+    if (!activeCardStillVisible) {
+      setActiveCardId(null);
+    }
+  }, [activeCardId, combinedVisiblePageCards]);
 
   useEffect(() => {
     void refreshCollection(true);
@@ -418,6 +471,33 @@ export default function App() {
     }));
   }
 
+  function handleCardHeightChange(cardId: number, height: number) {
+    if (activeCardId != null) {
+      return;
+    }
+
+    setCardHeights((current) => {
+      const roundedHeight = Math.ceil(height);
+      if (current[cardId] != null && Math.abs(current[cardId] - roundedHeight) < 8) {
+        return current;
+      }
+      return { ...current, [cardId]: roundedHeight };
+    });
+  }
+
+  function handleGridDragStart(_layout: Layout[], _oldItem: Layout, newItem: Layout) {
+    setActiveCardId(Number(newItem.i));
+  }
+
+  function handleGridDragStop(currentLayout: Layout[], _oldItem: Layout, _newItem: Layout, _placeholder: Layout, event: MouseEvent) {
+    if (event.type !== 'mouseup') {
+      return;
+    }
+
+    setOrderedCardIds((current) => sortCardIdsByLayout(currentLayout, current));
+    setActiveCardId(null);
+  }
+
   return (
     <main className="h-screen overflow-hidden bg-slate-50 text-slate-900">
       <div className="mx-auto flex h-full max-w-[1720px] flex-col gap-2 md:gap-3">
@@ -443,35 +523,49 @@ export default function App() {
           </div>
 
           {visiblePageCards.length === 0 ? (
-            <div className="grid min-h-0 flex-1 place-items-center px-2 pt-12 pb-2 text-base text-slate-400 md:px-5 md:pt-16 md:pb-5">
+            <div className="grid min-h-0 flex-1 place-items-center px-2 pt-12 pb-6 text-base text-slate-400 md:px-5 md:pt-16 md:pb-8">
               {loading ? 'Loading cards…' : 'No cards match the current filters.'}
             </div>
           ) : (
-            <div className="scrollbar-hidden min-h-0 flex-1 overflow-auto px-2 pt-12 pb-2 md:px-5 md:pt-16 md:pb-5">
-              <LayoutGroup>
-                <motion.div className="masonry-grid" layout transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}>
-                  <AnimatePresence initial={false} mode="popLayout">
-                    {visiblePageCards.map((pageCard) => (
-                      <CardTile
-                        availableTags={tags}
-                        card={pageCard.card}
-                        endpoint={endpoint}
-                        draft={pageCard.note ? noteDrafts[pageCard.note.noteId] ?? null : null}
-                        isPending={pageCard.note?.noteId ? pageCard.note.noteId < 0 : false}
-                        key={pageCard.card.cardId}
-                        note={pageCard.note}
-                        onDelete={deleteNote}
-                        onFieldChange={updateDraftField}
-                        onOpen={openInBrowser}
-                        onSuspend={setSuspended}
-                        onTagsChange={updateDraftTags}
-                        saving={pageCard.note ? Boolean(savingNoteIds[pageCard.note.noteId]) : false}
-                        working={pageCard.note?.noteId ? pageCard.note.noteId < 0 ? false : Boolean(workingCardIds[pageCard.card.cardId]) : false}
-                      />
-                    ))}
-                  </AnimatePresence>
-                </motion.div>
-              </LayoutGroup>
+            <div className="scrollbar-hidden min-h-0 flex-1 overflow-auto px-2 pt-12 pb-6 md:px-5 md:pt-16 md:pb-8">
+              <ResponsiveGridLayout
+                breakpoints={GRID_BREAKPOINTS}
+                className="masonry-grid"
+                cols={GRID_COLS}
+                compactType="vertical"
+                containerPadding={GRID_PADDING}
+                draggableHandle=".card-drag-handle"
+                isResizable={false}
+                layouts={layouts}
+                margin={GRID_MARGIN}
+                measureBeforeMount={false}
+                onDragStart={handleGridDragStart}
+                onDragStop={handleGridDragStop}
+                rowHeight={GRID_ROW_HEIGHT}
+                useCSSTransforms
+              >
+                {visiblePageCards.map((pageCard) => (
+                  <div className="grid-card-item" key={String(pageCard.card.cardId)}>
+                    <MeasuredCardTile
+                      availableTags={tags}
+                      card={pageCard.card}
+                      draft={pageCard.note ? noteDrafts[pageCard.note.noteId] ?? null : null}
+                      endpoint={endpoint}
+                      isDragging={activeCardId === pageCard.card.cardId}
+                      isPending={pageCard.note?.noteId ? pageCard.note.noteId < 0 : false}
+                      note={pageCard.note}
+                      onDelete={deleteNote}
+                      onFieldChange={updateDraftField}
+                      onHeightChange={handleCardHeightChange}
+                      onOpen={openInBrowser}
+                      onSuspend={setSuspended}
+                      onTagsChange={updateDraftTags}
+                      saving={pageCard.note ? Boolean(savingNoteIds[pageCard.note.noteId]) : false}
+                      working={pageCard.note?.noteId ? pageCard.note.noteId < 0 ? false : Boolean(workingCardIds[pageCard.card.cardId]) : false}
+                    />
+                  </div>
+                ))}
+              </ResponsiveGridLayout>
             </div>
           )}
         </section>
@@ -743,6 +837,116 @@ function expandHierarchicalPaths(paths: string[]): string[] {
   }
 
   return [...expanded];
+}
+
+type MeasuredCardTileProps = ComponentProps<typeof CardTile> & {
+  onHeightChange: (cardId: number, height: number) => void;
+};
+
+function MeasuredCardTile({ card, onHeightChange, ...props }: MeasuredCardTileProps) {
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!rootRef.current) {
+      return;
+    }
+
+    const element = rootRef.current;
+    const measure = () => {
+      onHeightChange(card.cardId, element.getBoundingClientRect().height);
+    };
+
+    measure();
+
+    const observer = new ResizeObserver(() => {
+      window.requestAnimationFrame(measure);
+    });
+
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [card.cardId, onHeightChange]);
+
+  return (
+    <div ref={rootRef}>
+      <CardTile {...props} card={card} isDragging={props.isDragging} />
+    </div>
+  );
+}
+
+function orderPageCards<T extends { card: { cardId: number } }>(pageCards: T[], orderedCardIds: number[]): T[] {
+  if (orderedCardIds.length === 0) {
+    return pageCards;
+  }
+
+  const pageCardMap = new Map(pageCards.map((pageCard) => [pageCard.card.cardId, pageCard]));
+  const orderedPageCards = orderedCardIds
+    .map((cardId) => pageCardMap.get(cardId))
+    .filter((pageCard): pageCard is T => Boolean(pageCard));
+
+  if (orderedPageCards.length === pageCards.length) {
+    return orderedPageCards;
+  }
+
+  const orderedCardIdSet = new Set(orderedPageCards.map((pageCard) => pageCard.card.cardId));
+  return [...orderedPageCards, ...pageCards.filter((pageCard) => !orderedCardIdSet.has(pageCard.card.cardId))];
+}
+
+function buildGridLayouts<T extends { card: { cardId: number } }>(
+  pageCards: T[],
+  cardHeights: Record<number, number>,
+): Layouts {
+  return Object.fromEntries(
+    Object.entries(GRID_COLS).map(([breakpoint, cols]) => [breakpoint, buildGridLayout(pageCards, cardHeights, cols)]),
+  ) as Layouts;
+}
+
+function buildGridLayout<T extends { card: { cardId: number } }>(
+  pageCards: T[],
+  cardHeights: Record<number, number>,
+  cols: number,
+): Layout[] {
+  return pageCards.map((pageCard, index) => ({
+    h: getGridItemRows(cardHeights[pageCard.card.cardId]),
+    i: String(pageCard.card.cardId),
+    maxW: 1,
+    minW: 1,
+    w: 1,
+    x: index % cols,
+    y: Math.floor(index / cols),
+  }));
+}
+
+function sortCardIdsByLayout(layout: Layout[], fallbackCardIds: number[]): number[] {
+  const fallbackIndex = new Map(fallbackCardIds.map((cardId, index) => [String(cardId), index]));
+
+  return [...layout]
+    .sort((left, right) => {
+      if (left.y !== right.y) {
+        return left.y - right.y;
+      }
+      if (left.x !== right.x) {
+        return left.x - right.x;
+      }
+      return (fallbackIndex.get(left.i) ?? 0) - (fallbackIndex.get(right.i) ?? 0);
+    })
+    .map((item) => Number(item.i))
+    .filter((cardId) => Number.isFinite(cardId));
+}
+
+function getGridItemRows(height?: number): number {
+  if (!height) {
+    return GRID_MIN_ROWS;
+  }
+
+  return Math.max(GRID_MIN_ROWS, Math.ceil((height + GRID_MARGIN[1]) / (GRID_ROW_HEIGHT + GRID_MARGIN[1])));
+}
+
+function areCardOrdersEqual(left: number[], right: number[]): boolean {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  return left.every((value, index) => value === right[index]);
 }
 
 function getOrderedFieldNames(note: NoteInfo): string[] {

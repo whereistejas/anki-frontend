@@ -21,6 +21,7 @@
     "marked": "^18.0.2",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
+    "react-grid-layout": "^2.2.3",
     "turndown": "^7.2.4"
   },
   "devDependencies": {
