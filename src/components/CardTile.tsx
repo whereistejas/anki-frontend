@@ -5,7 +5,7 @@ import { markdown as markdownLanguage } from '@codemirror/lang-markdown';
 import { RangeSetBuilder } from '@codemirror/state';
 import type { EditorView as CodeMirrorEditorView } from '@codemirror/view';
 import { Decoration, EditorView, ViewPlugin, WidgetType } from '@codemirror/view';
-import { BookmarkIcon, Cross2Icon, CrossCircledIcon, DragHandleDots2Icon, OpenInNewWindowIcon, TrashIcon } from '@radix-ui/react-icons';
+import { BookmarkIcon, CopyIcon, Cross2Icon, CrossCircledIcon, DragHandleDots2Icon, OpenInNewWindowIcon, TrashIcon } from '@radix-ui/react-icons';
 import katex from 'katex';
 import type { CardInfo, NoteInfo } from '../lib/ankiconnect';
 import { markdownToHtml } from '../lib/markdown';
@@ -111,6 +111,7 @@ function CardTile({
               <CardActions
                 availableTags={availableTags}
                 card={card}
+                copyText={buildCardCopyText(draft.fields[frontField] ?? '', draft.fields[backField] ?? '')}
                 noteId={note.noteId}
                 onDelete={onDelete}
                 onOpen={onOpen}
@@ -128,6 +129,7 @@ function CardTile({
               <CardActions
                 availableTags={availableTags}
                 card={card}
+                copyText={buildCardCopyText(draft.fields[frontField] ?? '', '')}
                 noteId={note.noteId}
                 onDelete={onDelete}
                 onOpen={onOpen}
@@ -317,6 +319,7 @@ function placeCursorFromCoords(view: CodeMirrorEditorView, coords: { x: number; 
 function CardActions({
   availableTags,
   card,
+  copyText,
   noteId,
   onDelete,
   onOpen,
@@ -329,6 +332,7 @@ function CardActions({
 }: {
   availableTags: string[];
   card: CardInfo;
+  copyText: string;
   noteId: number;
   onDelete: (noteId: number) => void;
   onOpen: (noteId: number) => void;
@@ -340,10 +344,23 @@ function CardActions({
   working: boolean;
 }) {
   const [tagsOpen, setTagsOpen] = useState(false);
+  const [copyFeedback, setCopyFeedback] = useState<'idle' | 'copied'>('idle');
   const [dropdownPosition, setDropdownPosition] = useState<{ left: number; top: number }>({ left: 12, top: 12 });
   const tagsRootRef = useRef<HTMLDivElement | null>(null);
   const tagsButtonRef = useRef<HTMLButtonElement | null>(null);
   const dropdownRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (copyFeedback !== 'copied') {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      setCopyFeedback('idle');
+    }, 1200);
+
+    return () => window.clearTimeout(timeout);
+  }, [copyFeedback]);
 
   useLayoutEffect(() => {
     if (!tagsOpen) {
@@ -453,6 +470,22 @@ function CardActions({
 
       <div className="pointer-events-auto flex items-center justify-end gap-1.5 text-base font-normal text-slate-400 md:gap-2">
         {saving ? <SavingSpinner /> : null}
+        <button
+          aria-label={copyFeedback === 'copied' ? 'Copied' : 'Copy card'}
+          className={`inline-flex items-center rounded-full p-1 transition ${
+            copyFeedback === 'copied'
+              ? 'bg-emerald-50 text-emerald-600 ring-1 ring-emerald-200'
+              : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900'
+          }`}
+          onClick={async () => {
+            await navigator.clipboard.writeText(copyText);
+            setCopyFeedback('copied');
+          }}
+          title={copyFeedback === 'copied' ? 'Copied' : 'Copy card'}
+          type="button"
+        >
+          <CopyIcon className="h-4 w-4" />
+        </button>
         {pending ? (
           <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-base font-normal text-amber-700 ring-1 ring-amber-200">
             Unsaved
@@ -508,6 +541,10 @@ function SavingSpinner() {
       </svg>
     </span>
   );
+}
+
+function buildCardCopyText(front: string, back: string): string {
+  return `${front}\n---\n${back}`;
 }
 
 function getPrimaryFieldNames(note: NoteInfo): string[] {
